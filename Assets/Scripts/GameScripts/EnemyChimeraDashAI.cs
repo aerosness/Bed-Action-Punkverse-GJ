@@ -1,10 +1,14 @@
 using UnityEngine;
+using UnityEngine.Events;
 
 [RequireComponent(typeof(Rigidbody))]
 public class EnemyChimeraDashAI : MonoBehaviour
 {
     [Header("Target")]
     [SerializeField] private Transform player;
+
+    // Автонаход контроллера игрока
+    private SimpleController_ZeroG playerController;
 
     [Header("Detection")]
     [Tooltip("Радиус, в котором химера агрится на игрока.")]
@@ -13,16 +17,31 @@ public class EnemyChimeraDashAI : MonoBehaviour
     [Tooltip("Радиус, после которого химера считает, что игрок ушёл (немного больше detection, чтобы не дёргалось).")]
     public float loseTargetRadius = 40f;
 
-    [Header("Patrol")]
+    [Header("State Options")]
+    [Tooltip("Включать ли состояние Idle вообще.")]
+    public bool enableIdleState = true;
+
+    [Tooltip("Начинать ли в Idle, а не с патруля.")]
+    public bool startInIdle = false;
+
+    [Tooltip("Сколько секунд висеть в Idle, если не агримся.")]
+    public float idleDuration = 3f;
+
+    [Header("Patrol (BlackHole-style)")]
+    [Tooltip("Центр, вокруг которого химера патрулирует. Если не задан, берётся её стартовая позиция.")]
+    public Transform patrolCenter;
+    [Tooltip("Минимальный радиус патруля.")]
+    public float patrolInnerRadius = 5f;
+    [Tooltip("Максимальный радиус патруля.")]
+    public float patrolOuterRadius = 15f;
     [Tooltip("Скорость патрулирования.")]
     public float patrolSpeed = 5f;
+    [Tooltip("Интервал смены цели патруля (секунд).")]
+    public Vector2 patrolTargetChangeInterval = new Vector2(2f, 5f);
+    [Tooltip("Насколько близко подлететь к цели, чтобы выбрать новую.")]
+    public float patrolTargetReachDistance = 0.5f;
 
-    [Tooltip("Точки патруля (опционально). Если пусто — химера будет просто дрейфовать вокруг стартовой позиции.")]
-    public Transform[] patrolPoints;
-
-    [Tooltip("Насколько близко подлететь к точке, чтобы считать её достигнутой.")]
-    public float patrolPointReachDistance = 1.0f;
-
+    [Header("Rotation")]
     [Tooltip("Скорость поворота при патруле и idle.")]
     public float lookRotateSpeed = 4f;
 
@@ -35,17 +54,23 @@ public class EnemyChimeraDashAI : MonoBehaviour
 
     [Header("Smoothing")]
     public float dragDuringDash = 0.5f;  // линейный демпфинг во время рывка
-    public float dragNormal = 2f;        // обычный демпфинг
+    public float dragNormal = 0.2f;      // обычный демпфинг
+
+    [Header("Player Interaction")]
+    public UnityEvent onPlayerKilled;
 
     private Rigidbody rb;
     private float stateTimer = 0f;
 
-    private int currentPatrolIndex = 0;
-    private Vector3 initialPosition;
     private bool playerInAggro = false;
+    private Vector3 initialPosition;
+
+    // патрульные цели в стиле чёрной дыры
+    private Vector3 patrolTarget;
+    private float nextPatrolTargetTime;
 
     private enum AIState { Idle, Patrol, Windup, Dash, Recover }
-    private AIState state = AIState.Idle;
+    [SerializeField] private AIState state = AIState.Idle;
 
     private void Awake()
     {
@@ -54,21 +79,48 @@ public class EnemyChimeraDashAI : MonoBehaviour
         rb.linearDamping = dragNormal;
 
         initialPosition = transform.position;
+
+        if (patrolCenter == null)
+            patrolCenter = transform; // центр патруля по умолчанию = стартовая позиция
     }
 
     private void Start()
     {
+        // 1) Если player не задан в инспекторе — пытаемся найти контроллер игрока
         if (player == null)
         {
-            GameObject p = GameObject.FindGameObjectWithTag("Player");
-            if (p != null) player = p.transform;
+            // Ищем SimpleController_ZeroG в сцене
+            playerController = FindObjectOfType<SimpleController_ZeroG>();
+            if (playerController != null)
+            {
+                player = playerController.transform;
+            }
+            else
+            {
+                // Фоллбек: старый поиск по тегу Player
+                GameObject p = GameObject.FindGameObjectWithTag("Player");
+                if (p != null)
+                {
+                    player = p.transform;
+                    playerController = p.GetComponent<SimpleController_ZeroG>();
+                }
+            }
+        }
+        else
+        {
+            // Если трансформ игрока уже указан вручную — пробуем найти на нём контроллер
+            playerController = player.GetComponent<SimpleController_ZeroG>();
         }
 
-        // Стартуем в патруле, если есть точки, иначе — idle
-        if (patrolPoints != null && patrolPoints.Length > 0)
-            SwitchState(AIState.Patrol);
-        else
+        if (player == null)
+        {
+            Debug.LogWarning($"{name}: EnemyChimeraDashAI не нашёл игрока ни по контроллеру SimpleController_ZeroG, ни по тегу Player.");
+        }
+
+        if (enableIdleState && startInIdle)
             SwitchState(AIState.Idle);
+        else
+            SwitchState(AIState.Patrol);
     }
 
     private void FixedUpdate()
@@ -105,9 +157,7 @@ public class EnemyChimeraDashAI : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Логика агро / деагро в зависимости от дистанции.
-    /// </summary>
+    // ---------- AGGRO / DEAGGRO ----------
     private void UpdateAggro(float distToPlayer)
     {
         // Входим в агро-зону
@@ -115,136 +165,125 @@ public class EnemyChimeraDashAI : MonoBehaviour
         {
             playerInAggro = true;
 
-            // Если мы были в Idle/Patrol — начинаем атаку
             if (state == AIState.Idle || state == AIState.Patrol)
-            {
                 SwitchState(AIState.Windup);
-            }
         }
         // Выходим из агро-зоны
         else if (playerInAggro && distToPlayer >= loseTargetRadius)
         {
-            // Сбрасываем флаг
             playerInAggro = false;
 
-            // Если сейчас не в самом рывке — сразу возвращаемся к патрулю/idle
+            // Если сейчас не в Windup/Dash — сразу возвращаемся в неагрессивное состояние
             if (state != AIState.Dash && state != AIState.Windup)
-            {
-                if (patrolPoints != null && patrolPoints.Length > 0)
-                    SwitchState(AIState.Patrol);
-                else
-                    SwitchState(AIState.Idle);
-            }
-            // Если в Dash/Windup — дадим рывку/циклу завершиться,
-            // а уже после Recover вернёмся к патрулю (см. RecoverBehavior).
+                GoBackToNonAggroState();
         }
+    }
+
+    private void GoBackToNonAggroState()
+    {
+        if (enableIdleState)
+            SwitchState(AIState.Idle);
+        else
+            SwitchState(AIState.Patrol);
     }
 
     // ---------- IDLE ----------
     private void IdleBehavior()
     {
-        // Медленно гасим скорость
-        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 2f);
+        // Гасим скорость
+        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 3f);
 
-        // Можем плавно крутиться, смотреть в случайную сторону, но для простоты оставим так.
         if (stateTimer <= 0f)
         {
-            // Idle по таймеру можно сменить на Patrol, если есть точки
-            if (patrolPoints != null && patrolPoints.Length > 0)
-            {
-                SwitchState(AIState.Patrol);
-            }
-            else
-            {
-                // Если хочешь, чтобы в Idle химера просто оставалась вечно — можешь убрать это.
-                stateTimer = 9999f;
-            }
+            SwitchState(AIState.Patrol);
         }
     }
 
-    // ---------- PATROL ----------
+    // ---------- PATROL (как чёрная дыра) ----------
     private void PatrolBehavior()
     {
-        // Если игрок занёсся в агро — логику патруля не выполняем
+        // Если игрок в агро — логика патруля не нужна
         if (playerInAggro)
             return;
 
-        Vector3 targetPos;
+        float dt = Time.fixedDeltaTime;
 
-        if (patrolPoints != null && patrolPoints.Length > 0)
+        // движение к цели
+        transform.position = Vector3.MoveTowards(
+            transform.position,
+            patrolTarget,
+            patrolSpeed * dt
+        );
+
+        // поворот в сторону движения
+        Vector3 toTarget = patrolTarget - transform.position;
+        if (toTarget.sqrMagnitude > 0.0001f)
         {
-            Transform patrolTarget = patrolPoints[currentPatrolIndex];
-            if (patrolTarget != null)
-            {
-                targetPos = patrolTarget.position;
-
-                // Движение к точке
-                Vector3 dir = (targetPos - transform.position);
-                float dist = dir.magnitude;
-
-                if (dist > patrolPointReachDistance)
-                {
-                    dir.Normalize();
-                    rb.linearVelocity = dir * patrolSpeed;
-
-                    // Поворот лицом к направлению движения
-                    if (dir.sqrMagnitude > 0.0001f)
-                    {
-                        Quaternion look = Quaternion.LookRotation(dir, Vector3.up);
-                        transform.rotation = Quaternion.Slerp(transform.rotation, look, Time.fixedDeltaTime * lookRotateSpeed);
-                    }
-                }
-                else
-                {
-                    // Переключаемся на следующую точку
-                    currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
-                }
-            }
+            Vector3 dir = toTarget.normalized;
+            Quaternion look = Quaternion.LookRotation(dir, Vector3.up);
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation,
+                look,
+                dt * lookRotateSpeed
+            );
         }
-        else
+
+        // смена цели по таймеру или при достижении
+        if (Time.time >= nextPatrolTargetTime ||
+            Vector3.Distance(transform.position, patrolTarget) < patrolTargetReachDistance)
         {
-            // Если патрульных точек нет, просто дрейфуем вокруг стартовой позиции
-            Vector3 dirToCenter = initialPosition - transform.position;
-            float dist = dirToCenter.magnitude;
-
-            if (dist > 2f)
-            {
-                dirToCenter.Normalize();
-                rb.linearVelocity = dirToCenter * patrolSpeed * 0.6f;
-            }
-            else
-            {
-                // Немного тормозим у центра
-                rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 1.5f);
-            }
+            PickNewPatrolTarget();
         }
+
+        // если куда-то совсем улетел — вернём вокруг центра
+        float distFromCenter = Vector3.Distance(patrolCenter.position, transform.position);
+        if (distFromCenter > patrolOuterRadius * 1.5f)
+        {
+            Vector3 dir = (transform.position - patrolCenter.position).normalized;
+            transform.position = patrolCenter.position + dir * patrolOuterRadius;
+            PickNewPatrolTarget();
+        }
+    }
+
+    private void PickNewPatrolTarget()
+    {
+        if (patrolCenter == null)
+        {
+            patrolTarget = transform.position;
+            return;
+        }
+
+        Vector3 dir = Random.onUnitSphere;
+        dir.Normalize();
+
+        float r = Random.Range(patrolInnerRadius, patrolOuterRadius);
+        patrolTarget = patrolCenter.position + dir * r;
+
+        float t = Random.Range(patrolTargetChangeInterval.x, patrolTargetChangeInterval.y);
+        nextPatrolTargetTime = Time.time + t;
     }
 
     // ---------- WINDUP (подготовка к рывку) ----------
     private void WindupBehavior()
     {
-        // Поворачиваемся к игроку
         Vector3 dir = (player.position - transform.position).normalized;
         Quaternion look = Quaternion.LookRotation(dir, Vector3.up);
         transform.rotation = Quaternion.Slerp(transform.rotation, look, Time.fixedDeltaTime * 6f);
 
+        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 4f);
+
         if (stateTimer <= 0f)
-        {
             PerformDash();
-        }
     }
 
     // ---------- DASH ----------
     private void DashBehavior()
     {
-        // Ограничиваем скорость
         if (rb.linearVelocity.magnitude > maxSpeed)
             rb.linearVelocity = rb.linearVelocity.normalized * maxSpeed;
 
         if (stateTimer <= 0f)
-        {
             SwitchState(AIState.Recover);
-        }
     }
 
     // ---------- RECOVER ----------
@@ -252,25 +291,19 @@ public class EnemyChimeraDashAI : MonoBehaviour
     {
         if (stateTimer <= 0f)
         {
-            // Если игрок всё ещё в агро-зоне — повторяем цикл атаки
             if (playerInAggro)
-            {
                 SwitchState(AIState.Windup);
-            }
             else
-            {
-                // Иначе возвращаемся к патрулю/idle
-                if (patrolPoints != null && patrolPoints.Length > 0)
-                    SwitchState(AIState.Patrol);
-                else
-                    SwitchState(AIState.Idle);
-            }
+                GoBackToNonAggroState();
         }
     }
 
     // ---------- Выполнение рывка ----------
     private void PerformDash()
     {
+        if (player == null)
+            return;
+
         Vector3 dir = (player.position - transform.position).normalized;
 
         rb.linearDamping = dragDuringDash;
@@ -288,13 +321,13 @@ public class EnemyChimeraDashAI : MonoBehaviour
         {
             case AIState.Idle:
                 rb.linearDamping = dragNormal;
-                // Если хочешь, чтобы Idle был "бесконечным" — можно ставить большое число
-                stateTimer = (customTime > 0 ? customTime : 3f);
+                stateTimer = (customTime > 0 ? customTime : idleDuration);
                 break;
 
             case AIState.Patrol:
                 rb.linearDamping = dragNormal;
-                stateTimer = (customTime > 0 ? customTime : 9999f); // по сути безлимит
+                stateTimer = (customTime > 0 ? customTime : 9999f);
+                PickNewPatrolTarget();
                 break;
 
             case AIState.Windup:
@@ -303,7 +336,6 @@ public class EnemyChimeraDashAI : MonoBehaviour
                 break;
 
             case AIState.Dash:
-                // drag уже выставлен в PerformDash
                 stateTimer = (customTime > 0 ? customTime : dashDuration);
                 break;
 
@@ -311,6 +343,23 @@ public class EnemyChimeraDashAI : MonoBehaviour
                 rb.linearDamping = dragNormal;
                 stateTimer = (customTime > 0 ? customTime : recoveryTime);
                 break;
+        }
+    }
+
+    // ---------- КОЛЛИЗИИ: смерть игрока ----------
+    private void OnCollisionEnter(Collision collision)
+    {
+        if (collision.collider.CompareTag("Player"))
+        {
+            onPlayerKilled?.Invoke();
+        }
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            onPlayerKilled?.Invoke();
         }
     }
 }

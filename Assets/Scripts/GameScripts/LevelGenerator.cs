@@ -66,6 +66,33 @@ public class LevelGenerator : MonoBehaviour
     [Tooltip("Минимальное расстояние между самими чёрными дырами.")]
     public float minDistanceBetweenBlackHoles = 25f;
 
+    // --- ХИМЕРЫ ---
+    [Header("Chimeras")]
+    [Tooltip("Префабы химеры (вражеский ИИ).")]
+    public GameObject[] chimeraPrefabs;
+
+    [Tooltip("Минимальное и максимальное количество химер.")]
+    public int minChimeras = 1;
+    public int maxChimeras = 3;
+
+    [Tooltip("Минимальный радиус спавна химер от центра.")]
+    public float chimeraInnerRadius = 40f;
+
+    [Tooltip("Максимальный радиус спавна химер от центра.")]
+    public float chimeraOuterRadius = 140f;
+
+    [Tooltip("Половина угла по вертикали (в градусах) для пояса химер. 90 = почти везде.")]
+    public float chimeraBeltHalfAngle = 80f;
+
+    [Tooltip("Минимальное расстояние от химеры до мусора.")]
+    public float minDistanceChimeraToDebris = 10f;
+
+    [Tooltip("Минимальное расстояние от химеры до чёрных дыр.")]
+    public float minDistanceChimeraToBlackHoles = 15f;
+
+    [Tooltip("Минимальное расстояние между химерми.")]
+    public float minDistanceBetweenChimeras = 25f;
+
     [Header("Player Zone")]
     public Transform player;
     public UnityEvent onPlayerExitZone;
@@ -75,6 +102,7 @@ public class LevelGenerator : MonoBehaviour
 
     private readonly List<Transform> spawnedDebris = new List<Transform>();
     private readonly List<Transform> spawnedBlackHoles = new List<Transform>();
+    private readonly List<Transform> spawnedChimeras = new List<Transform>();
 
     private void Start()
     {
@@ -108,11 +136,12 @@ public class LevelGenerator : MonoBehaviour
         CheckPlayerZone();
     }
 
-    // --- очистка всех детей-объектов (мусор + чёрные дыры) ---
+    // --- очистка всех детей-объектов (мусор + чёрные дыры + химеры) ---
     private void ClearExistingObjects()
     {
         spawnedDebris.Clear();
         spawnedBlackHoles.Clear();
+        spawnedChimeras.Clear();
 
         for (int i = transform.childCount - 1; i >= 0; i--)
         {
@@ -139,22 +168,26 @@ public class LevelGenerator : MonoBehaviour
 
         spawnedDebris.Clear();
         spawnedBlackHoles.Clear();
+        spawnedChimeras.Clear();
 
         float[] ringRadii = GenerateRingRadii();
 
         float beltHalfRad = beltHalfAngle * Mathf.Deg2Rad;
         float maxAbsY = Mathf.Sin(beltHalfRad);
 
-        // Сначала генерируем мусор
+        // 1) Сначала генерируем мусор
         foreach (float radius in ringRadii)
         {
             GenerateRingAtRadius(radius, maxAbsY);
         }
 
-        // Затем — чёрные дыры
+        // 2) Затем — чёрные дыры
         GenerateBlackHoles();
 
-        Debug.Log($"LevelGenerator: сгенерировано {spawnedDebris.Count} объектов мусора и {spawnedBlackHoles.Count} чёрных дыр.");
+        // 3) Затем — химеры
+        GenerateChimeras();
+
+        Debug.Log($"LevelGenerator: сгенерировано {spawnedDebris.Count} мусора, {spawnedBlackHoles.Count} чёрных дыр, {spawnedChimeras.Count} химер.");
     }
 
     private float[] GenerateRingRadii()
@@ -304,7 +337,6 @@ public class LevelGenerator : MonoBehaviour
 
             for (int attempt = 0; attempt < 50 && !placed; attempt++)
             {
-                // направление примерно в поясе
                 Vector3 dir = Random.onUnitSphere;
                 if (Mathf.Abs(dir.y) > maxAbsY)
                     continue;
@@ -312,14 +344,12 @@ public class LevelGenerator : MonoBehaviour
                 float r = Random.Range(blackHoleInnerRadius, blackHoleOuterRadius);
                 Vector3 worldPos = center.position + dir * r;
 
-                // не слишком близко к мусору
                 if (minDistanceBlackHoleToDebris > 0f &&
                     !IsFarEnoughFromList(worldPos, spawnedDebris, minDistanceBlackHoleToDebris))
                 {
                     continue;
                 }
 
-                // не слишком близко к другим чёрным дырам
                 if (minDistanceBetweenBlackHoles > 0f &&
                     !IsFarEnoughFromList(worldPos, spawnedBlackHoles, minDistanceBetweenBlackHoles))
                 {
@@ -332,6 +362,78 @@ public class LevelGenerator : MonoBehaviour
 
                 GameObject bh = Instantiate(prefab, worldPos, Quaternion.identity, transform);
                 spawnedBlackHoles.Add(bh.transform);
+                placed = true;
+            }
+        }
+    }
+
+    // ---------- ХИМЕРЫ ----------
+    private void GenerateChimeras()
+    {
+        if (chimeraPrefabs == null || chimeraPrefabs.Length == 0)
+        {
+            Debug.Log("LevelGenerator: префабы химер не заданы — пропускаем.");
+            return;
+        }
+
+        int chimCount = Mathf.Clamp(
+            Random.Range(minChimeras, maxChimeras + 1),
+            0,
+            50
+        );
+
+        if (chimCount <= 0)
+            return;
+
+        float beltRad = chimeraBeltHalfAngle * Mathf.Deg2Rad;
+        float maxAbsY = Mathf.Sin(beltRad);
+
+        for (int i = 0; i < chimCount; i++)
+        {
+            bool placed = false;
+
+            for (int attempt = 0; attempt < 50 && !placed; attempt++)
+            {
+                Vector3 dir = Random.onUnitSphere;
+                if (Mathf.Abs(dir.y) > maxAbsY)
+                    continue;
+
+                float r = Random.Range(chimeraInnerRadius, chimeraOuterRadius);
+                Vector3 worldPos = center.position + dir * r;
+
+                // чтобы не пересекались с мусором
+                if (minDistanceChimeraToDebris > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedDebris, minDistanceChimeraToDebris))
+                {
+                    continue;
+                }
+
+                // чтобы не сидели прямо на чёрной дыре
+                if (minDistanceChimeraToBlackHoles > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedBlackHoles, minDistanceChimeraToBlackHoles))
+                {
+                    continue;
+                }
+
+                // чтобы химеры не спавнились в куче
+                if (minDistanceBetweenChimeras > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedChimeras, minDistanceBetweenChimeras))
+                {
+                    continue;
+                }
+
+                GameObject prefab = chimeraPrefabs[Random.Range(0, chimeraPrefabs.Length)];
+                if (prefab == null)
+                    continue;
+
+                GameObject chim = Instantiate(prefab, worldPos, Quaternion.identity, transform);
+                spawnedChimeras.Add(chim.transform);
+
+                // если хочешь, можно сразу настроить её AI под центр:
+                // var ai = chim.GetComponent<EnemyChimeraDashAI>();
+                // if (ai != null && ai.patrolCenter == null)
+                //     ai.patrolCenter = center;
+
                 placed = true;
             }
         }
@@ -374,9 +476,12 @@ public class LevelGenerator : MonoBehaviour
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(center.position, playRadius);
 
-        // можно визуально подсветить диапазон чёрных дыр
         Gizmos.color = new Color(1f, 0.2f, 0.4f, 0.4f);
         Gizmos.DrawWireSphere(center.position, blackHoleInnerRadius);
         Gizmos.DrawWireSphere(center.position, blackHoleOuterRadius);
+
+        Gizmos.color = new Color(0.3f, 0.9f, 0.3f, 0.4f);
+        Gizmos.DrawWireSphere(center.position, chimeraInnerRadius);
+        Gizmos.DrawWireSphere(center.position, chimeraOuterRadius);
     }
 }

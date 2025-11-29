@@ -155,11 +155,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EnemyChimeraDashAI
   player: {fileID: 0}
-  detectionRadius: 80
-  loseTargetRadius: 100
-  patrolSpeed: 5
-  patrolPoints: []
-  patrolPointReachDistance: 1
+  detectionRadius: 70
+  loseTargetRadius: 70
+  enableIdleState: 0
+  startInIdle: 0
+  idleDuration: 3
+  patrolCenter: {fileID: 0}
+  patrolInnerRadius: 50
+  patrolOuterRadius: 100
+  patrolSpeed: 10
+  patrolTargetChangeInterval: {x: 50, y: 30}
+  patrolTargetReachDistance: 0.5
   lookRotateSpeed: 4
   windupTime: 0.4
   dashForce: 400
@@ -168,3 +174,7 @@ MonoBehaviour:
   maxSpeed: 60
   dragDuringDash: 0.5
   dragNormal: 2
+  onPlayerKilled:
+    m_PersistentCalls:
+      m_Calls: []
+  state: 0
