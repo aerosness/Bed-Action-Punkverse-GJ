@@ -99,7 +99,7 @@ public class ShipMissionController : MonoBehaviour
         if (furnace == null)
             return false;
 
-        return furnace.IsFurnaceUsed;
+        return PlayerMissionState.TrashBurned;
     }
 
     private void UpdateHudMessage()
@@ -132,26 +132,28 @@ public class ShipMissionController : MonoBehaviour
 
     private void StartFlight()
     {
+        // Сбрасываем глобальное состояние под новую миссию
+        PlayerMissionState.ResetForNewMission();
+
         isFlying = true;
         flightTimer = flightDuration;
 
         if (hudText != null)
             hudText.gameObject.SetActive(false);
 
-        // Первый полёт случился — больше не первый
-        if (isFirstMission)
-            isFirstMission = false;
+        // если у тебя есть флаг "первый вылет"
+        // if (isFirstMission)
+        //     isFirstMission = false;
 
-        // Лочим управление игрока, если задано
         if (playerControllerToLock != null)
             playerControllerToLock.enabled = false;
 
-        // Сохраняем исходную позицию камеры
         if (cameraShakeTarget != null)
             cameraOriginalLocalPos = cameraShakeTarget.localPosition;
 
-        Debug.Log("Корабль: старт полёта на миссию.");
+        Debug.Log("Корабль: старт полёта на миссию (стейт очищен).");
     }
+
 
     // --- ОБРАБОТКА ПОЛЁТА И ТРЯСКИ ---
 
