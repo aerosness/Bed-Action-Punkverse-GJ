@@ -10,23 +10,27 @@ public class ShipMissionController : MonoBehaviour
     [TextArea]
     [SerializeField] private string needTrashMessage = "Throw trash in the furnace first";
 
-    [Header("Ссылки")]
-    [SerializeField] private FurnaceController furnace;              // Печь
-    [SerializeField] private string playerTag = "Player";            // Тег игрока
-    [SerializeField] private Transform cameraShakeTarget;            // Камера или её родитель
-    [SerializeField] private MonoBehaviour playerControllerToLock;   // сюда можно перетащить FirstPersonController
+    [Header("РЎРІСЏР·Рё")]
+    [SerializeField] private FurnaceController furnace;
+    [SerializeField] private string playerTag = "Player";
+    [SerializeField] private Transform cameraShakeTarget;
+    [SerializeField] private MonoBehaviour playerControllerToLock;
 
-    [Header("Первый вылет")]
-    [Tooltip("Можно ли первый раз улететь без печки")]
+    [Header("РџРµСЂРІС‹Р№ РІС‹Р»РµС‚")]
     [SerializeField] private bool allowFirstMissionWithoutFurnace = true;
-
-    [Tooltip("Если true — считается, что это первый вылет. После первого полёта станет false.")]
     [SerializeField] private bool isFirstMission = true;
 
-    [Header("Параметры полёта")]
-    [SerializeField] private float flightDuration = 5f;              // 5–6 секунд
+    [Header("РџР°СЂР°РјРµС‚СЂС‹ РїРѕР»РµС‚Р°")]
+    [SerializeField] private float flightDuration = 5f;
     [SerializeField] private float shakeIntensity = 0.3f;
     [SerializeField] private float shakeFrequency = 25f;
+
+    // ---------- РђРЈР”РРћ ----------
+    [Header("Audio")]
+    [SerializeField] private AudioSource flightAudioSource; 
+    [SerializeField] private AudioClip flightStartClip;   
+    [SerializeField] private AudioClip flightLoopClip;    
+    // -----------------------------
 
     private bool playerInTrigger;
     private bool isFlying;
@@ -73,12 +77,10 @@ public class ShipMissionController : MonoBehaviour
         if (!playerInTrigger || isFlying)
             return;
 
-        // Нажатие E у корабля
         if (Input.GetKeyDown(KeyCode.E))
         {
             if (!CanFlyNow())
             {
-                // Просто обновляем HUD на предупреждение
                 ShowWarning();
                 return;
             }
@@ -87,15 +89,13 @@ public class ShipMissionController : MonoBehaviour
         }
     }
 
-    // --- ЛОГИКА УСЛОВИЙ ---
+    // --- РџСЂРѕРІРµСЂРєРё ---
 
     private bool CanFlyNow()
     {
-        // Первый вылет — разрешаем без печки
         if (allowFirstMissionWithoutFurnace && isFirstMission)
             return true;
 
-        // Далее — только если печка использована
         if (furnace == null)
             return false;
 
@@ -107,15 +107,7 @@ public class ShipMissionController : MonoBehaviour
         if (hudText == null)
             return;
 
-        if (CanFlyNow())
-        {
-            hudText.text = flyMessage;
-        }
-        else
-        {
-            hudText.text = needTrashMessage;
-        }
-
+        hudText.text = CanFlyNow() ? flyMessage : needTrashMessage;
         hudText.gameObject.SetActive(true);
     }
 
@@ -128,11 +120,10 @@ public class ShipMissionController : MonoBehaviour
         hudText.gameObject.SetActive(true);
     }
 
-    // --- СТАРТ ПОЛЁТА ---
+    // --- РЎС‚Р°СЂС‚ РїРѕР»РµС‚Р° ---
 
     private void StartFlight()
     {
-        // Сбрасываем глобальное состояние под новую миссию
         PlayerMissionState.ResetForNewMission();
 
         isFlying = true;
@@ -141,21 +132,31 @@ public class ShipMissionController : MonoBehaviour
         if (hudText != null)
             hudText.gameObject.SetActive(false);
 
-        // если у тебя есть флаг "первый вылет"
-        // if (isFirstMission)
-        //     isFirstMission = false;
-
         if (playerControllerToLock != null)
             playerControllerToLock.enabled = false;
 
         if (cameraShakeTarget != null)
             cameraOriginalLocalPos = cameraShakeTarget.localPosition;
 
-        Debug.Log("Корабль: старт полёта на миссию (стейт очищен).");
+        // ---------- Р—РђРџРЈРЎРљ Р—Р’РЈРљРђ ----------
+        if (flightAudioSource != null && flightStartClip != null)
+        {
+            flightAudioSource.PlayOneShot(flightStartClip);
+        }
+
+        if (flightAudioSource != null && flightLoopClip != null)
+        {
+            flightAudioSource.clip = flightLoopClip;
+            flightAudioSource.loop = true;
+            flightAudioSource.Play();
+        }
+        // ----------------------------------
+
+        Debug.Log("РџРѕР»РµС‚: РєРѕСЂР°Р±Р»СЊ РѕС‚СЂС‹РІР°РµС‚СЃСЏ РѕС‚ РїР»Р°С‚С„РѕСЂРјС‹.");
     }
 
 
-    // --- ОБРАБОТКА ПОЛЁТА И ТРЯСКИ ---
+    // --- Р›РѕРіРёРєР° РїРѕР»РµС‚Р° + С‚СЂСЏСЃРєР° РєР°РјРµСЂС‹ ---
 
     private void HandleFlight()
     {
@@ -164,13 +165,12 @@ public class ShipMissionController : MonoBehaviour
 
         flightTimer -= Time.deltaTime;
 
-        float t = Mathf.Clamp01(1f - (flightTimer / flightDuration)); // 0 -> 1 по мере полёта
+        float t = Mathf.Clamp01(1f - (flightTimer / flightDuration));
 
-        // Тряска
+        // РўСЂСЏСЃРєР°
         if (cameraShakeTarget != null)
         {
             float shake = shakeIntensity * (1f - Mathf.Abs(0.5f - t) * 2f);
-            // усиление к середине и спад к концу
 
             float offsetX = (Mathf.PerlinNoise(Time.time * shakeFrequency, 0f) - 0.5f) * 2f * shake;
             float offsetY = (Mathf.PerlinNoise(0f, Time.time * shakeFrequency) - 0.5f) * 2f * shake;
@@ -197,8 +197,15 @@ public class ShipMissionController : MonoBehaviour
         PlayerMissionState.HasArrivedAtLocation = true;
         TodoListUI.Instance.SetTask("Put on a spacesuit");
 
+        // ---------- РћРЎРўРђРќРћР’РљРђ Р—Р’РЈРљРђ ----------
+        if (flightAudioSource != null)
+        {
+            flightAudioSource.loop = false;
+            flightAudioSource.Stop();
+        }
+        // --------------------------------------
 
-        Debug.Log("Корабль: полёт завершён. Здесь можно вызвать загрузку следующей сцены.");
+        Debug.Log("РџРѕР»РµС‚ Р·Р°РІРµСЂС€РµРЅ. РљРѕСЂР°Р±Р»СЊ РїСЂРёР±С‹Р».");
     }
 
 }

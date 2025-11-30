@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Events;
 
 [RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(AudioSource))]
 public class EnemyChimeraDashAI : MonoBehaviour
 {
     [Header("Target")]
@@ -56,16 +57,34 @@ public class EnemyChimeraDashAI : MonoBehaviour
     public float dragDuringDash = 0.5f;  // линейный демпфинг во время рывка
     public float dragNormal = 0.2f;      // обычный демпфинг
 
+    [Header("Audio")]
+    [Tooltip("Звук подготовки к рывку (windup).")]
+    public AudioClip windupClip;
+
+    [Tooltip("Громкость звука подготовки.")]
+    [Range(0f, 1f)] public float windupVolume = 1f;
+
+    [Tooltip("Звук самого рывка (dash).")]
+    public AudioClip dashClip;
+
+    [Tooltip("Громкость звука рывка.")]
+    [Range(0f, 1f)] public float dashVolume = 1f;
+
+    [Tooltip("Случайный разброс питча (0 = выключен).")]
+    [Range(0f, 0.5f)] public float randomPitchJitter = 0.1f;
+
     [Header("Player Interaction")]
     public UnityEvent onPlayerKilled;
 
     private Rigidbody rb;
+    private AudioSource audioSource;
+
     private float stateTimer = 0f;
 
     private bool playerInAggro = false;
     private Vector3 initialPosition;
 
-    // патрульные цели в стиле чёрной дыры
+    // патрульные цели
     private Vector3 patrolTarget;
     private float nextPatrolTargetTime;
 
@@ -78,6 +97,11 @@ public class EnemyChimeraDashAI : MonoBehaviour
         rb.useGravity = false;
         rb.linearDamping = dragNormal;
 
+        audioSource = GetComponent<AudioSource>();
+        audioSource.playOnAwake = false;
+        audioSource.loop = false;
+        audioSource.spatialBlend = 1f; // 3D звук
+
         initialPosition = transform.position;
 
         if (patrolCenter == null)
@@ -86,10 +110,9 @@ public class EnemyChimeraDashAI : MonoBehaviour
 
     private void Start()
     {
-        // 1) Если player не задан в инспекторе — пытаемся найти контроллер игрока
+        // автонахождение игрока / контроллера
         if (player == null)
         {
-            // Ищем SimpleController_ZeroG в сцене
             playerController = FindObjectOfType<SimpleController_ZeroG>();
             if (playerController != null)
             {
@@ -97,7 +120,6 @@ public class EnemyChimeraDashAI : MonoBehaviour
             }
             else
             {
-                // Фоллбек: старый поиск по тегу Player
                 GameObject p = GameObject.FindGameObjectWithTag("Player");
                 if (p != null)
                 {
@@ -108,13 +130,12 @@ public class EnemyChimeraDashAI : MonoBehaviour
         }
         else
         {
-            // Если трансформ игрока уже указан вручную — пробуем найти на нём контроллер
             playerController = player.GetComponent<SimpleController_ZeroG>();
         }
 
         if (player == null)
         {
-            Debug.LogWarning($"{name}: EnemyChimeraDashAI не нашёл игрока ни по контроллеру SimpleController_ZeroG, ни по тегу Player.");
+            Debug.LogWarning($"{name}: EnemyChimeraDashAI не нашёл игрока ни по SimpleController_ZeroG, ни по тегу Player.");
         }
 
         if (enableIdleState && startInIdle)
@@ -135,45 +156,27 @@ public class EnemyChimeraDashAI : MonoBehaviour
 
         switch (state)
         {
-            case AIState.Idle:
-                IdleBehavior();
-                break;
-
-            case AIState.Patrol:
-                PatrolBehavior();
-                break;
-
-            case AIState.Windup:
-                WindupBehavior();
-                break;
-
-            case AIState.Dash:
-                DashBehavior();
-                break;
-
-            case AIState.Recover:
-                RecoverBehavior();
-                break;
+            case AIState.Idle:   IdleBehavior();   break;
+            case AIState.Patrol: PatrolBehavior(); break;
+            case AIState.Windup: WindupBehavior(); break;
+            case AIState.Dash:   DashBehavior();   break;
+            case AIState.Recover:RecoverBehavior();break;
         }
     }
 
     // ---------- AGGRO / DEAGGRO ----------
     private void UpdateAggro(float distToPlayer)
     {
-        // Входим в агро-зону
         if (!playerInAggro && distToPlayer <= detectionRadius)
         {
             playerInAggro = true;
-
             if (state == AIState.Idle || state == AIState.Patrol)
                 SwitchState(AIState.Windup);
         }
-        // Выходим из агро-зоны
         else if (playerInAggro && distToPlayer >= loseTargetRadius)
         {
             playerInAggro = false;
 
-            // Если сейчас не в Windup/Dash — сразу возвращаемся в неагрессивное состояние
             if (state != AIState.Dash && state != AIState.Windup)
                 GoBackToNonAggroState();
         }
@@ -190,32 +193,26 @@ public class EnemyChimeraDashAI : MonoBehaviour
     // ---------- IDLE ----------
     private void IdleBehavior()
     {
-        // Гасим скорость
         rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 3f);
 
         if (stateTimer <= 0f)
-        {
             SwitchState(AIState.Patrol);
-        }
     }
 
-    // ---------- PATROL (как чёрная дыра) ----------
+    // ---------- PATROL ----------
     private void PatrolBehavior()
     {
-        // Если игрок в агро — логика патруля не нужна
         if (playerInAggro)
             return;
 
         float dt = Time.fixedDeltaTime;
 
-        // движение к цели
         transform.position = Vector3.MoveTowards(
             transform.position,
             patrolTarget,
             patrolSpeed * dt
         );
 
-        // поворот в сторону движения
         Vector3 toTarget = patrolTarget - transform.position;
         if (toTarget.sqrMagnitude > 0.0001f)
         {
@@ -228,14 +225,12 @@ public class EnemyChimeraDashAI : MonoBehaviour
             );
         }
 
-        // смена цели по таймеру или при достижении
         if (Time.time >= nextPatrolTargetTime ||
             Vector3.Distance(transform.position, patrolTarget) < patrolTargetReachDistance)
         {
             PickNewPatrolTarget();
         }
 
-        // если куда-то совсем улетел — вернём вокруг центра
         float distFromCenter = Vector3.Distance(patrolCenter.position, transform.position);
         if (distFromCenter > patrolOuterRadius * 1.5f)
         {
@@ -263,14 +258,22 @@ public class EnemyChimeraDashAI : MonoBehaviour
         nextPatrolTargetTime = Time.time + t;
     }
 
-    // ---------- WINDUP (подготовка к рывку) ----------
+    // ---------- WINDUP ----------
     private void WindupBehavior()
     {
         Vector3 dir = (player.position - transform.position).normalized;
         Quaternion look = Quaternion.LookRotation(dir, Vector3.up);
-        transform.rotation = Quaternion.Slerp(transform.rotation, look, Time.fixedDeltaTime * 6f);
+        transform.rotation = Quaternion.Slerp(
+            transform.rotation,
+            look,
+            Time.fixedDeltaTime * 6f
+        );
 
-        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 4f);
+        rb.linearVelocity = Vector3.Lerp(
+            rb.linearVelocity,
+            Vector3.zero,
+            Time.fixedDeltaTime * 4f
+        );
 
         if (stateTimer <= 0f)
             PerformDash();
@@ -309,6 +312,9 @@ public class EnemyChimeraDashAI : MonoBehaviour
         rb.linearDamping = dragDuringDash;
         rb.AddForce(dir * dashForce, ForceMode.VelocityChange);
 
+        // звук прыжка
+        PlayClip(dashClip, dashVolume);
+
         SwitchState(AIState.Dash, dashDuration);
     }
 
@@ -333,6 +339,9 @@ public class EnemyChimeraDashAI : MonoBehaviour
             case AIState.Windup:
                 rb.linearDamping = dragNormal;
                 stateTimer = (customTime > 0 ? customTime : windupTime);
+
+                // звук подготовки
+                PlayClip(windupClip, windupVolume);
                 break;
 
             case AIState.Dash:
@@ -346,20 +355,29 @@ public class EnemyChimeraDashAI : MonoBehaviour
         }
     }
 
+    // ---------- АУДИО-ХЕЛПЕР ----------
+    private void PlayClip(AudioClip clip, float volume)
+    {
+        if (clip == null || audioSource == null || volume <= 0f)
+            return;
+
+        float basePitch = 1f;
+        float jitter = Random.Range(-randomPitchJitter, randomPitchJitter);
+        audioSource.pitch = basePitch + jitter;
+
+        audioSource.PlayOneShot(clip, volume);
+    }
+
     // ---------- КОЛЛИЗИИ: смерть игрока ----------
     private void OnCollisionEnter(Collision collision)
     {
         if (collision.collider.CompareTag("Player"))
-        {
             onPlayerKilled?.Invoke();
-        }
     }
 
     private void OnTriggerEnter(Collider other)
     {
         if (other.CompareTag("Player"))
-        {
             onPlayerKilled?.Invoke();
-        }
     }
 }

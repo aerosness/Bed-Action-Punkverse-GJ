@@ -8,11 +8,18 @@ public class SpacesuitInteraction : MonoBehaviour
     [TextArea]
     [SerializeField] private string equipMessage = "Press [E], to put on the spacesuit";
 
-    [Header("Объект скафандра")]
-    [SerializeField] private GameObject spacesuitVisual; // сам модель/объект скафандра
+    [Header("Р’РёР·СѓР°Р» СЃРєР°С„Р°РЅРґСЂР°")]
+    [SerializeField] private GameObject spacesuitVisual;
 
-    [Header("Игрок")]
+    [Header("РРіСЂРѕРє")]
     [SerializeField] private string playerTag = "Player";
+
+    // ---------- РђРЈР”РРћ ----------
+    [Header("Audio")]
+    [SerializeField] private AudioSource equipAudioSource;
+    [SerializeField] private AudioClip equipSound;
+    [SerializeField] private AudioClip equipLoopSound;
+    // -----------------------------
 
     private bool playerInTrigger;
     private bool equippedLocally;
@@ -51,7 +58,6 @@ public class SpacesuitInteraction : MonoBehaviour
         if (!playerInTrigger)
             return;
 
-        // До прилёта на локацию вообще нельзя взаимодействовать
         if (!PlayerMissionState.HasArrivedAtLocation)
         {
             if (hudText != null)
@@ -59,7 +65,6 @@ public class SpacesuitInteraction : MonoBehaviour
             return;
         }
 
-        // Если уже надели скафандр – нечего делать
         if (PlayerMissionState.IsWearingSpacesuit || equippedLocally)
         {
             if (hudText != null)
@@ -98,13 +103,24 @@ public class SpacesuitInteraction : MonoBehaviour
         if (hudText != null)
             hudText.gameObject.SetActive(false);
 
-        // Прячем визуал скафандра
+        // СѓР±СЂР°С‚СЊ СЃРєР°С„Р°РЅРґСЂ РёР· РјРёСЂР°
         if (spacesuitVisual != null)
             spacesuitVisual.SetActive(false);
 
-        // При желании здесь можно:
-        // - включить пост-эффект шлема
-        // - включить HUD шлема и т.д.
-        Debug.Log("Игрок надел скафандр.");
+        // ---------- Р—Р’РЈРљ РќРђР”Р•Р’РђРќРРЇ ----------
+        if (equipAudioSource != null && equipSound != null)
+        {
+            equipAudioSource.PlayOneShot(equipSound);
+        }
+
+        if (equipAudioSource != null && equipLoopSound != null)
+        {
+            equipAudioSource.clip = equipLoopSound;
+            equipAudioSource.loop = true;
+            equipAudioSource.Play();
+        }
+        // -------------------------------------
+
+        Debug.Log("РЎРєР°С„Р°РЅРґСЂ РЅР°РґРµС‚.");
     }
 }
