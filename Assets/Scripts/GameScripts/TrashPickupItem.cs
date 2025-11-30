@@ -3,22 +3,29 @@ using TMPro;
 
 public class TrashPickupItem : MonoBehaviour
 {
-    [Header("Игрок")]
+    [Header("пїЅпїЅпїЅпїЅпїЅ")]
     [SerializeField] private string playerTag = "Player";
 
-    [Header("HUD подсказка")]
+    [Header("HUD пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ")]
     [SerializeField] private TMP_Text hintText;
     [TextArea]
-    [SerializeField] private string hintMessage = "Нажмите [E], чтобы подобрать мусор";
+    [SerializeField] private string hintMessage = "Press [E] to pick up";
 
     private bool playerInTrigger;
     private bool pickedUp;
 
     private void Start()
     {
-        if (hintText != null)
-            hintText.gameObject.SetActive(false);
+        GameObject obj = GameObject.Find("Hint");
+        if (obj != null)
+            hintText = obj.GetComponent<TMP_Text>();
+        else
+            return;
+
+        hintText.gameObject.SetActive(false);
+
     }
+
 
     private void OnTriggerEnter(Collider other)
     {
@@ -48,7 +55,7 @@ public class TrashPickupItem : MonoBehaviour
     {
         if (!playerInTrigger || pickedUp) return;
 
-        // старый Input, так что у тебя должен стоять Active Input Handling = Both
+        // пїЅпїЅпїЅпїЅпїЅпїЅ Input, пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ Active Input Handling = Both
         if (Input.GetKeyDown(KeyCode.E))
         {
             PickUp();
@@ -69,7 +76,7 @@ public class TrashPickupItem : MonoBehaviour
         else
         {
             Debug.LogError("TrashPickupItem: TrashCollectorManager.Instance == null. " +
-                           "Убедись, что в сцене есть объект с TrashCollectorManager.");
+                           "пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ TrashCollectorManager.");
         }
 
         Destroy(gameObject);

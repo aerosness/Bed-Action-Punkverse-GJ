@@ -144,7 +144,7 @@ public class DoorButtonSlidingDoors : MonoBehaviour
             // закрытие
             isOpened = true; // чтобы закрывалось корректно
         }
-        TodoListUI.Instance.SetTask("Покинуть отсек");
+        TodoListUI.Instance.SetTask("Leave the ship");
 
         if (doorAudio != null)
             doorAudio.Play();

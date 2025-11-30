@@ -13,9 +13,9 @@ public class ReturnToShipZone : MonoBehaviour
     [Header("HUD подсказка")]
     [SerializeField] private TMP_Text hintText;
     [TextArea]
-    [SerializeField] private string needMoreTrashMessage = "Сначала соберите весь мусор";
+    [SerializeField] private string needMoreTrashMessage = "Need more trash";
     [TextArea]
-    [SerializeField] private string canReturnMessage = "Нажмите [E], чтобы вернуться на корабль";
+    [SerializeField] private string canReturnMessage = "Press [E] to enter";
 
     private bool playerInTrigger;
 
