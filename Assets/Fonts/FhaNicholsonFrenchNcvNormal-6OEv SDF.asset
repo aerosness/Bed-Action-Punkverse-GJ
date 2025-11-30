@@ -5513,7 +5513,7 @@ Material:
     - _ScaleRatioC: 0.609375
     - _ScaleX: 1
     - _ScaleY: 1
-    - _ShaderFlags: 0
+    - _ShaderFlags: 1
     - _Sharpness: 0
     - _SpecularPower: 2
     - _Stencil: 0

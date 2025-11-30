@@ -372,12 +372,12 @@ public class EnemyChimeraDashAI : MonoBehaviour
     private void OnCollisionEnter(Collision collision)
     {
         if (collision.collider.CompareTag("Player"))
-            onPlayerKilled?.Invoke();
+            player.GetComponent<DeathMenu>().Die();
     }
 
     private void OnTriggerEnter(Collider other)
     {
         if (other.CompareTag("Player"))
-            onPlayerKilled?.Invoke();
+            player.GetComponent<DeathMenu>().Die();
     }
 }

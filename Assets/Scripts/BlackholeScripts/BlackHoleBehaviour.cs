@@ -207,9 +207,7 @@ public class BlackHoleBehaviour : MonoBehaviour
         // Если задели игрока
         if (other.CompareTag("Player"))
         {
-            onPlayerHit?.Invoke();
-            // игрока обычно не уничтожаем напрямую, геймовер через событие
-            return;
+            GameObject.FindGameObjectWithTag("Player").GetComponent<DeathMenu>().Die();
         }
 
         if (destroyOtherObjects)
