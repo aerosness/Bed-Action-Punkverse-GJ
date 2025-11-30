@@ -93,6 +93,36 @@ public class LevelGenerator : MonoBehaviour
     [Tooltip("Минимальное расстояние между химерми.")]
     public float minDistanceBetweenChimeras = 25f;
 
+    // --- ТОПЛИВО / COLLECTIBLES ---
+    [Header("Fuel Collectibles")]
+    [Tooltip("Префабы топлива (важные collectible).")]
+    public GameObject[] fuelPrefabs;
+
+    [Tooltip("Минимальное и максимальное количество канистр топлива на уровне.")]
+    public int minFuelCount = 3;
+    public int maxFuelCount = 6;
+
+    [Tooltip("Минимальный радиус спавна топлива от центра (чтобы не было халявы у базы).")]
+    public float fuelInnerRadius = 50f;
+
+    [Tooltip("Максимальный радиус спавна топлива от центра.")]
+    public float fuelOuterRadius = 140f;
+
+    [Tooltip("Половина угла по вертикали (в градусах) для пояса топлива.")]
+    public float fuelBeltHalfAngle = 85f;
+
+    [Tooltip("Минимальное расстояние от топлива до мусора.")]
+    public float minDistanceFuelToDebris = 6f;
+
+    [Tooltip("Минимальное расстояние от топлива до чёрных дыр.")]
+    public float minDistanceFuelToBlackHoles = 12f;
+
+    [Tooltip("Минимальное расстояние от топлива до химер.")]
+    public float minDistanceFuelToChimeras = 12f;
+
+    [Tooltip("Минимальное расстояние между самими канистрами топлива.")]
+    public float minDistanceBetweenFuel = 18f;
+
     [Header("Player Zone")]
     public Transform player;
     public UnityEvent onPlayerExitZone;
@@ -100,9 +130,10 @@ public class LevelGenerator : MonoBehaviour
 
     private bool exitEventFired = false;
 
-    private readonly List<Transform> spawnedDebris = new List<Transform>();
-    private readonly List<Transform> spawnedBlackHoles = new List<Transform>();
-    private readonly List<Transform> spawnedChimeras = new List<Transform>();
+    private readonly List<Transform> spawnedDebris      = new List<Transform>();
+    private readonly List<Transform> spawnedBlackHoles  = new List<Transform>();
+    private readonly List<Transform> spawnedChimeras    = new List<Transform>();
+    private readonly List<Transform> spawnedFuel        = new List<Transform>();
 
     private void Start()
     {
@@ -136,12 +167,13 @@ public class LevelGenerator : MonoBehaviour
         CheckPlayerZone();
     }
 
-    // --- очистка всех детей-объектов (мусор + чёрные дыры + химеры) ---
+    // --- очистка всех детей-объектов ---
     private void ClearExistingObjects()
     {
         spawnedDebris.Clear();
         spawnedBlackHoles.Clear();
         spawnedChimeras.Clear();
+        spawnedFuel.Clear();
 
         for (int i = transform.childCount - 1; i >= 0; i--)
         {
@@ -169,25 +201,34 @@ public class LevelGenerator : MonoBehaviour
         spawnedDebris.Clear();
         spawnedBlackHoles.Clear();
         spawnedChimeras.Clear();
+        spawnedFuel.Clear();
 
         float[] ringRadii = GenerateRingRadii();
 
         float beltHalfRad = beltHalfAngle * Mathf.Deg2Rad;
         float maxAbsY = Mathf.Sin(beltHalfRad);
 
-        // 1) Сначала генерируем мусор
+        // 1) Мусор
         foreach (float radius in ringRadii)
         {
             GenerateRingAtRadius(radius, maxAbsY);
         }
 
-        // 2) Затем — чёрные дыры
+        // 2) Чёрные дыры
         GenerateBlackHoles();
 
-        // 3) Затем — химеры
+        // 3) Химеры
         GenerateChimeras();
 
-        Debug.Log($"LevelGenerator: сгенерировано {spawnedDebris.Count} мусора, {spawnedBlackHoles.Count} чёрных дыр, {spawnedChimeras.Count} химер.");
+        // 4) Топливо (последним, чтобы учесть всё остальное)
+        GenerateFuel();
+
+        Debug.Log(
+            $"LevelGenerator: мусор={spawnedDebris.Count}, " +
+            $"чёрные дыры={spawnedBlackHoles.Count}, " +
+            $"химеры={spawnedChimeras.Count}, " +
+            $"топливо={spawnedFuel.Count}."
+        );
     }
 
     private float[] GenerateRingRadii()
@@ -401,21 +442,18 @@ public class LevelGenerator : MonoBehaviour
                 float r = Random.Range(chimeraInnerRadius, chimeraOuterRadius);
                 Vector3 worldPos = center.position + dir * r;
 
-                // чтобы не пересекались с мусором
                 if (minDistanceChimeraToDebris > 0f &&
                     !IsFarEnoughFromList(worldPos, spawnedDebris, minDistanceChimeraToDebris))
                 {
                     continue;
                 }
 
-                // чтобы не сидели прямо на чёрной дыре
                 if (minDistanceChimeraToBlackHoles > 0f &&
                     !IsFarEnoughFromList(worldPos, spawnedBlackHoles, minDistanceChimeraToBlackHoles))
                 {
                     continue;
                 }
 
-                // чтобы химеры не спавнились в куче
                 if (minDistanceBetweenChimeras > 0f &&
                     !IsFarEnoughFromList(worldPos, spawnedChimeras, minDistanceBetweenChimeras))
                 {
@@ -429,11 +467,84 @@ public class LevelGenerator : MonoBehaviour
                 GameObject chim = Instantiate(prefab, worldPos, Quaternion.identity, transform);
                 spawnedChimeras.Add(chim.transform);
 
-                // если хочешь, можно сразу настроить её AI под центр:
-                // var ai = chim.GetComponent<EnemyChimeraDashAI>();
-                // if (ai != null && ai.patrolCenter == null)
-                //     ai.patrolCenter = center;
+                // Можно сразу подтянуть центр патруля
+                var ai = chim.GetComponent<EnemyChimeraDashAI>();
+                if (ai != null && ai.patrolCenter == null)
+                    ai.patrolCenter = center;
 
+                placed = true;
+            }
+        }
+    }
+
+    // ---------- ТОПЛИВО ----------
+    private void GenerateFuel()
+    {
+        if (fuelPrefabs == null || fuelPrefabs.Length == 0)
+        {
+            Debug.Log("LevelGenerator: префабы топлива не заданы — пропускаем.");
+            return;
+        }
+
+        int fuelCount = Mathf.Clamp(
+            Random.Range(minFuelCount, maxFuelCount + 1),
+            0,
+            50
+        );
+
+        if (fuelCount <= 0)
+            return;
+
+        float beltRad = fuelBeltHalfAngle * Mathf.Deg2Rad;
+        float maxAbsY = Mathf.Sin(beltRad);
+
+        for (int i = 0; i < fuelCount; i++)
+        {
+            bool placed = false;
+
+            for (int attempt = 0; attempt < 60 && !placed; attempt++)
+            {
+                Vector3 dir = Random.onUnitSphere;
+                if (Mathf.Abs(dir.y) > maxAbsY)
+                    continue;
+
+                float r = Random.Range(fuelInnerRadius, fuelOuterRadius);
+                Vector3 worldPos = center.position + dir * r;
+
+                // не вплотную к мусору
+                if (minDistanceFuelToDebris > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedDebris, minDistanceFuelToDebris))
+                {
+                    continue;
+                }
+
+                // не вплотную к чёрным дырам
+                if (minDistanceFuelToBlackHoles > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedBlackHoles, minDistanceFuelToBlackHoles))
+                {
+                    continue;
+                }
+
+                // не вплотную к химерм
+                if (minDistanceFuelToChimeras > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedChimeras, minDistanceFuelToChimeras))
+                {
+                    continue;
+                }
+
+                // не стэкаем канистры
+                if (minDistanceBetweenFuel > 0f &&
+                    !IsFarEnoughFromList(worldPos, spawnedFuel, minDistanceBetweenFuel))
+                {
+                    continue;
+                }
+
+                GameObject prefab = fuelPrefabs[Random.Range(0, fuelPrefabs.Length)];
+                if (prefab == null)
+                    continue;
+
+                GameObject fuel = Instantiate(prefab, worldPos, Quaternion.identity, transform);
+                spawnedFuel.Add(fuel.transform);
                 placed = true;
             }
         }
@@ -483,5 +594,9 @@ public class LevelGenerator : MonoBehaviour
         Gizmos.color = new Color(0.3f, 0.9f, 0.3f, 0.4f);
         Gizmos.DrawWireSphere(center.position, chimeraInnerRadius);
         Gizmos.DrawWireSphere(center.position, chimeraOuterRadius);
+
+        Gizmos.color = new Color(1f, 0.9f, 0.2f, 0.35f);
+        Gizmos.DrawWireSphere(center.position, fuelInnerRadius);
+        Gizmos.DrawWireSphere(center.position, fuelOuterRadius);
     }
 }
