@@ -14,7 +14,6 @@ public class DeathMenu : MonoBehaviour
             deathScreen.SetActive(true);
 
         // остановить время (если нужно)
-        Time.timeScale = 0f;
 
         // освободить мышку
         Cursor.lockState = CursorLockMode.None;
