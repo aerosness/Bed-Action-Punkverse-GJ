@@ -22,4 +22,8 @@ public class GameManager : MonoBehaviour
         // В билде закроет игру, в редакторе — не видно эффекта
         Application.Quit();
     }
+    public void ReloadScene()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
+    }
 }

@@ -22,7 +22,7 @@ public class TrashPickupItem : MonoBehaviour
         else
             return;
 
-        hintText.gameObject.SetActive(false);
+        hintText.gameObject.SetActive(true);
 
     }
 
